@@ -9,9 +9,8 @@ class CartItemWidget extends StatelessWidget {
   final double price;
   final int quantity;
   final String image;
-  final bool isEditable; // Thêm tham số isEditable
+  final bool isEditable;
 
-  // Sửa lỗi ở dòng 25: Thêm từ khóa const
   const CartItemWidget({
     required this.id,
     required this.name,

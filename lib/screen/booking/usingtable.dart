@@ -67,7 +67,7 @@ class _UsingTableScreenState extends State<UsingTableScreen> {
   Future<TableReservation?> fetchReservationById(int reservationId) async {
     try {
       final response = await http.get(
-        Uri.parse('http://192.168.44.2:8080/api/reservations/$reservationId'),
+        Uri.parse('localhost:8080/api/reservations/$reservationId'),
       );
 
       print("Trạng thái phản hồi API: ${response.statusCode}");
@@ -119,7 +119,7 @@ class _UsingTableScreenState extends State<UsingTableScreen> {
                 if (reservation != null && reservation!.id != null) {
                   try {
                     final response = await http.put(
-                      Uri.parse('http://192.168.44.2:8080/api/reservations/${reservation!.id}/cancel'),
+                      Uri.parse('localhost:8080/api/reservations/${reservation!.id}/cancel'),
                       headers: {'Content-Type': 'application/json'},
                     );
 
@@ -199,7 +199,7 @@ class _UsingTableScreenState extends State<UsingTableScreen> {
       print('Gửi dữ liệu đơn hàng: ${json.encode(orderData)}');
 
       final response = await http.post(
-        Uri.parse('http://192.168.44.2:8080/api/orders'),
+        Uri.parse('localhost:8080/api/orders'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode(orderData),
       );

@@ -4,7 +4,7 @@ import 'package:test2/screen/template.dart';
 import 'package:test2/screen/cart/cart_provider.dart';
 import 'package:test2/screen/payment/payment.dart';
 import 'package:test2/screen/cart/cartitem.dart';
-import 'package:test2/screen/cart/cartmodel.dart';
+import 'package:test2/model/cartmodel.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:intl/intl.dart';
@@ -19,19 +19,14 @@ class CartScreen extends StatefulWidget {
 class _CartScreenState extends State<CartScreen> {
   bool _isLoading = false;
 
-  final String tableId = "1";
-  final String note = "idk";
-
   Future<Map<String, dynamic>?> createOrderApi(List<Map<String, dynamic>> items) async {
     setState(() {
       _isLoading = true;
     });
 
     try {
-      final validItems = items.where((item) =>
-      item["dishId"] != null && (item["dishId"] is int && item["dishId"] > 0)).toList();
-
-      if (validItems.isEmpty) {
+      // Các items đã được lọc trong CartProvider.getOrderItems()
+      if (items.isEmpty) {
         setState(() {
           _isLoading = false;
         });
@@ -39,14 +34,19 @@ class _CartScreenState extends State<CartScreen> {
         return null;
       }
 
-      final url = Uri.parse('http://192.168.44.2:8080/api/orders');
+      // Đảm bảo URL đúng định dạng với protocol
+      final url = Uri.parse('http://localhost:8080/api/orders');
+
+      print("DEBUG: Sending request to: $url");
+      print("DEBUG: Request body: ${jsonEncode({
+        "items": items,
+      })}");
+
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          "tableId": tableId,
-          "items": validItems,
-          "note": note,
+          "items": items,
         }),
       );
 
@@ -54,17 +54,21 @@ class _CartScreenState extends State<CartScreen> {
         _isLoading = false;
       });
 
+      print("DEBUG: Response status: ${response.statusCode}");
+      print("DEBUG: Response body: ${response.body}");
+
       if (response.statusCode == 200 || response.statusCode == 201) {
         return jsonDecode(response.body);
       } else {
-        _showErrorSnackBar('Lỗi tạo đơn hàng: ${response.statusCode}');
+        _showErrorSnackBar('Lỗi tạo đơn hàng: ${response.statusCode} - ${response.body}');
         return null;
       }
     } catch (e) {
+      print("DEBUG: Error creating order: $e");
       setState(() {
         _isLoading = false;
       });
-      _showErrorSnackBar('Lỗi kết nối đến máy chủ');
+      _showErrorSnackBar('Lỗi kết nối đến máy chủ: $e');
       return null;
     }
   }
@@ -87,31 +91,18 @@ class _CartScreenState extends State<CartScreen> {
       return;
     }
 
-    final List<Map<String, dynamic>> items = [];
-
-    for (var entry in cart.items.entries) {
-      String keyId = entry.key;
-      int? dishId;
-
-      try {
-        dishId = int.parse(keyId);
-      } catch (e) {
-        continue;
-      }
-
-      if (dishId > 0) {
-        items.add({
-          "dishId": dishId,
-          "quantity": entry.value.quantity,
-        });
-      }
-    }
+    // Sử dụng phương thức getOrderItems() từ CartProvider
+    // Phương thức này đã xử lý việc chuyển đổi productId thành dishId
+    final List<Map<String, dynamic>> items = cart.getOrderItems();
+    print("DEBUG: Cart items count: ${cart.items.length}");
+    print("DEBUG: Valid items for API: ${items}");
 
     if (items.isEmpty) {
       _showErrorSnackBar('Không tìm thấy món hàng có ID hợp lệ');
       return;
     }
 
+    print("DEBUG: Sending order with items: $items");
     final response = await createOrderApi(items);
 
     if (response != null) {
@@ -134,6 +125,7 @@ class _CartScreenState extends State<CartScreen> {
       }
     }
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -165,6 +157,7 @@ class _CartScreenState extends State<CartScreen> {
                       price: cartItem.price,
                       quantity: cartItem.quantity,
                       image: cartItem.image,
+
                     );
                   },
                 ),

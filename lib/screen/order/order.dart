@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
@@ -6,20 +8,9 @@ import 'dart:convert';
 import 'package:test2/screen/template.dart';
 import 'package:test2/screen/cart/cart_provider.dart';
 
-// Model Category
-class Category {
-  final int id;
-  final String title;
-  final String? image;
-  final List<dynamic> products;
+import '../../model/Category.dart';
+import '../../model/dish.dart';
 
-  Category({
-    required this.id,
-    required this.title,
-    this.image,
-    required this.products,
-  });
-}
 
 class OrderScreen extends StatefulWidget {
   @override
@@ -41,82 +32,95 @@ class _OrderScreenState extends State<OrderScreen> {
 
   Future<void> fetchData() async {
     try {
-      final response = await http.get(Uri.parse('http://192.168.44.2:8080/api/dishes'));
+      final categoryResponse = await http.get(Uri.parse('http://localhost:8080/api/categories'));
 
-      if (response.statusCode == 200) {
+      if (categoryResponse.statusCode == 200) {
         try {
-          final data = json.decode(utf8.decode(response.bodyBytes));
+
+          final categoryData = json.decode(utf8.decode(categoryResponse.bodyBytes));
           Map<int, Category> categoriesMap = {};
 
-          for (var dish in data) {
-            final categoryId = dish['category']?['categoryId'] is int
-                ? dish['category']['categoryId']
-                : int.tryParse(dish['category']?['categoryId'].toString() ?? '') ?? 0;
+          for (var categoryJson in categoryData) {
+            final categoryId = categoryJson['categoryId'] ?? 0;
+            final categoryName = categoryJson['name'] ?? 'Unknown';
+            final categoryImage = categoryJson['imageUrl'] ?? '';
 
-            if (categoryId == 100) continue;
-
-            final categoryMap = dish['category'] ?? {};
-            final categoryName = categoryMap['name'] ?? 'Unknown';
-            final categoryImage = categoryMap['imageUrl'] ?? '';
-
-            categoriesMap.putIfAbsent(
-              categoryId,
-                  () => Category(
-                id: categoryId,
-                title: categoryName,
-                image: categoryImage,
-                products: [],
-              ),
+            categoriesMap[categoryId] = Category(
+              id: categoryId,
+              name: categoryName,
+              image: categoryImage,
+              products: [],
             );
-
-            categoriesMap[categoryId]!.products.add({
-              'id': dish['id'],
-              'name': dish['name'],
-              'description': dish['description'],
-              'price': dish['price'],
-              'image': dish['imageUrl'],
-            });
-
           }
 
-          if (mounted) {
-            setState(() {
-              categories = categoriesMap.values.toList();
+          final dishResponse = await http.get(Uri.parse('http://localhost:8080/api/dishes'));
 
-              final customOrder = [80, 90];
-              categories.sort((a, b) {
-                int indexA = customOrder.indexOf(a.id);
-                int indexB = customOrder.indexOf(b.id);
+          if (dishResponse.statusCode == 200) {
 
-                if (indexA == -1) indexA = customOrder.length + a.id;
-                if (indexB == -1) indexB = customOrder.length + b.id;
+            final dishData = json.decode(utf8.decode(dishResponse.bodyBytes));
 
-                return indexA.compareTo(indexB);
+
+            for (var dishJson in dishData) {
+              final categoryId = dishJson['categoryId'] ?? 0;
+
+              if (categoryId != null) {
+                categoriesMap[categoryId]?.products.add(Dish.fromJson(dishJson));
+              } else {
+                print('Danh mục ID: $categoryId không tồn tại trong categoriesMap!');
+              }
+            }
+
+            // 5. Cập nhật giao diện
+            if (mounted) {
+              setState(() {
+                categories = categoriesMap.values.toList();
+
+                final customOrder = [80, 90];
+                categories.sort((a, b) {
+                  int indexA = customOrder.indexOf(a.id);
+                  int indexB = customOrder.indexOf(b.id);
+
+                  if (indexA == -1) indexA = customOrder.length + a.id;
+                  if (indexB == -1) indexB = customOrder.length + b.id;
+
+                  return indexA.compareTo(indexB);
+                });
+
+                isLoading = false;
+                errorMessage = '';
               });
-
+            }
+          } else {
+            print('Lỗi tải món ăn: ${dishResponse.statusCode}');
+            setState(() {
               isLoading = false;
-              errorMessage = '';
+              errorMessage = 'Lỗi tải món ăn: ${dishResponse.statusCode}';
             });
           }
         } catch (e) {
+          print('Lỗi trong quá trình parse danh mục: $e');
           setState(() {
             isLoading = false;
-            errorMessage = 'Lỗi parse JSON: $e';
+            errorMessage = 'Lỗi parse danh mục: $e';
           });
         }
       } else {
+        print('Lỗi tải danh mục: ${categoryResponse.statusCode}');
         setState(() {
           isLoading = false;
-          errorMessage = 'Lỗi tải dữ liệu: ${response.statusCode}';
+          errorMessage = 'Lỗi tải danh mục: ${categoryResponse.statusCode}';
         });
       }
     } catch (e) {
+      print('Lỗi kết nối hoặc ngoại lệ không xác định: $e');
       setState(() {
         isLoading = false;
         errorMessage = 'Lỗi kết nối: $e';
       });
     }
   }
+
+
 
   int getQuantity(String productName) => productQuantities[productName] ?? 0;
 
@@ -216,7 +220,7 @@ class _OrderScreenState extends State<OrderScreen> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          category.title,
+                          category.name,
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
@@ -233,10 +237,11 @@ class _OrderScreenState extends State<OrderScreen> {
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Text(
-              categories[selectedIndex].title,
+              categories[selectedIndex].name,
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
           ),
+
           ...categories[selectedIndex].products
               .map((product) => _buildProductItem(context, product))
               .toList(),
@@ -244,14 +249,14 @@ class _OrderScreenState extends State<OrderScreen> {
       ),
     );
   }
-
-  Widget _buildProductItem(BuildContext context, Map<String, dynamic> product) {
-    final name = product['name'] ?? '';
-    final price = double.tryParse(product['price']?.toString() ?? '0') ?? 0;
+  Widget _buildProductItem(BuildContext context, Dish product) {
+    final id = product.id;
+    final name = product.name;
+    final price = product.price.toDouble();
     final formattedPrice = formatCurrency(price);
     final quantity = getQuantity(name);
-    final description = product['description'] ?? '';
-    final imageUrl = product['image'] ?? '';
+    final description = product.description;
+    final imageUrl = product.image ?? '';
 
     return GestureDetector(
       onTap: () {
@@ -355,7 +360,7 @@ class _OrderScreenState extends State<OrderScreen> {
                 onPressed: () {
                   updateQuantity(name, true);
                   Provider.of<CartProvider>(context, listen: false).addItem(
-                    "${product['id']}_$name",
+                    id.toString(),
                     name,
                     price,
                     imageUrl,

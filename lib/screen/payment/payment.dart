@@ -1,3 +1,5 @@
+import 'package:url_launcher/url_launcher.dart';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:test2/screen/cart/cart_provider.dart';
@@ -9,17 +11,16 @@ import 'package:test2/screen/cart/cartitem.dart';
 import 'package:intl/intl.dart'; // Thư viện để định dạng số
 import 'dart:async';
 import 'package:test2/screen/payment/success.dart'; // Import trang success.dart
-import 'package:flutter_paypal_payment/flutter_paypal_payment.dart';
-import 'package:vnpay_flutter/vnpay_flutter.dart'; // Import VNPay Flutter package
+import 'package:uni_links/uni_links.dart';
+
 
 class PaymentScreen extends StatefulWidget {
-  final double amount;
   final String orderId;
-
+  final double amount;
   const PaymentScreen({
     Key? key,
-    required this.amount,
-    required this.orderId,
+
+    required this.orderId, required this.amount,
   }) : super(key: key);
 
   @override
@@ -30,7 +31,7 @@ class PaymentScreenState extends State<PaymentScreen> {
   bool _isLoading = false;
   String? _paymentUrl;
   String? _errorMessage;
-  String _selectedMethod = "paypal";
+  String _selectedMethod = "";
   final NumberFormat _currencyFormat = NumberFormat('#,###', 'vi_VN');
 
   // Tab mới để theo dõi trạng thái
@@ -42,21 +43,48 @@ class PaymentScreenState extends State<PaymentScreen> {
   Future<void> _initializePayment() async {
     // Xử lý trường hợp thanh toán tiền mặt
     if (_selectedMethod == "cash") {
-      // Cập nhật trạng thái đơn hàng thành "đang xử lý" hoặc "chờ thanh toán"
-      await _updateOrderStatus("pending");
+      try {
+        // Gọi API thanh toán tiền mặt
+        final url = Uri.parse('http://localhost:8080/api/orders/${widget.orderId}/pay-cash');
+        final response = await http.post(
+          url,
+          headers: {'Content-Type': 'application/json'},
+        );
 
-      // Chuyển thẳng sang trang success
-      Provider.of<CartProvider>(context, listen: false).clear();
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => SuccessScreen()),
-      );
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          print("Thanh toán tiền mặt thành công: ${data['message']}");
+
+          // Xóa giỏ hàng sau khi thanh toán
+          Provider.of<CartProvider>(context, listen: false).clear();
+
+          // Chuyển đến màn hình thành công
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => SuccessScreen()),
+          );
+        } else {
+          print('Thanh toán không thành công: ${response.body}');
+          // Xử lý khi API trả về lỗi
+          _showErrorDialog('Thanh toán không thành công, vui lòng thử lại!');
+        }
+      } catch (e) {
+        print('Lỗi khi thực hiện thanh toán tiền mặt: $e');
+        // Hiển thị lỗi cho người dùng
+        _showErrorDialog('Có lỗi xảy ra khi thanh toán. Vui lòng thử lại!');
+      }
+      return;
+    }
+    if (_selectedMethod == "paypal") {
+      await _launchPaypalCheckout(int.parse(widget.orderId));
+      _startCheckingPaymentStatus();
       return;
     }
 
     // Xử lý thanh toán VNPay riêng
     if (_selectedMethod == "vnpay") {
       await _processVNPayPayment();
+      _startCheckingPaymentStatus();
       return;
     }
 
@@ -84,113 +112,112 @@ class PaymentScreenState extends State<PaymentScreen> {
     }
   }
 
-  Future<void> _processVNPayPayment() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
+  Future<String?> _createPaypalOrder(int orderId) async {
+    final url = Uri.parse('http://localhost:8080/api/payment/paypal/create-order?orderId=$orderId');
     try {
-      final paymentUrl = VNPAYFlutter.instance.generatePaymentUrl(
-        url: 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
-        version: '2.0.1',
-        tmnCode: 'PHCKMLTO', // Sử dụng TMN code được cung cấp
-        txnRef: widget.orderId,
-        orderInfo: 'Thanh toán đơn hàng #${widget.orderId}',
-        amount: widget.amount, // Sử dụng kiểu double trực tiếp
-        returnUrl: 'http://192.168.44.2:8080/api/payments/vnpay/return', // Địa chỉ API nhận kết quả
-        ipAdress: '192.168.44.2', // Thay đổi địa chỉ IP phù hợp với máy chủ của bạn
-        vnpayHashKey: 'WKBFORFGBUGKCVZOT1SK3BNGZOBELGFK', // Sử dụng vnp_HashSecret được cung cấp
-        vnPayHashType: VNPayHashType.HMACSHA512,
-        vnpayExpireDate: DateTime.now().add(const Duration(minutes: 15)),
-      );
+      final response = await http.post(url);
 
-      setState(() {
-        _isLoading = false;
-      });
-
-      await VNPAYFlutter.instance.show(
-        paymentUrl: paymentUrl,
-        onPaymentSuccess: (params) async {
-          setState(() {
-            _responseCode = params['vnp_ResponseCode'];
-          });
-
-          if (_responseCode == '00') { // Mã thành công từ VNPay
-            // Cập nhật trạng thái đơn hàng trên server
-            await _updateOrderStatus("completed");
-
-            // Xóa giỏ hàng và chuyển đến trang thành công
-            Provider.of<CartProvider>(context, listen: false).clear();
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => SuccessScreen()),
-            );
-          } else {
-            // Xử lý các trạng thái khác từ VNPay
-            _showPaymentErrorDialog('Thanh toán không thành công. Mã lỗi: $_responseCode');
-          }
-        },
-        onPaymentError: (params) {
-          setState(() {
-            _responseCode = 'Error';
-          });
-          _showPaymentErrorDialog('Đã xảy ra lỗi trong quá trình thanh toán.');
-        },
-      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['approvalUrl']; // Trả về URL để redirect đến PayPal
+      } else {
+        print('Lỗi khi tạo đơn hàng PayPal: ${response.statusCode}');
+      }
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Không thể khởi tạo thanh toán VNPay: $e';
-      });
+      print('Exception khi gọi API PayPal: $e');
+    }
+    return null;
+  }
+
+  Future<void> _launchPaypalCheckout(int orderId) async {
+    final url = await _createPaypalOrder(orderId);
+    if (url != null && await canLaunch(url)) {
+      await launch(url); // Mở URL thanh toán
+    } else {
+      print('Không thể mở URL thanh toán PayPal');
     }
   }
 
-  void _showPaymentErrorDialog(String message) {
+  Future<void> _processVNPayPayment() async {
+    try {
+      final url = Uri.parse('http://localhost:8080/api/payment/vnpay/order/${widget.orderId}');
+
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        // Lấy URL thanh toán từ response
+        final paymentUrl = data['url']; // ví dụ: "https://sandbox.vnpay.vn/checkout..."
+
+        if (paymentUrl != null && paymentUrl.isNotEmpty) {
+          // Mở tab thanh toán trên web
+          if (kIsWeb) {
+            html.window.open(paymentUrl, '_blank');
+          }
+
+          _startCheckingPaymentStatus();
+        } else {
+          _showErrorDialog('Không nhận được URL thanh toán từ VNPay.');
+        }
+      } else {
+        _showErrorDialog('Không thể tạo URL thanh toán. Mã lỗi: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Lỗi khi xử lý thanh toán VNPay: $e');
+      _showErrorDialog('Đã xảy ra lỗi trong quá trình tạo URL thanh toán.');
+    }
+  }
+
+
+  void _showErrorDialog(String message) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Lỗi thanh toán"),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-            },
-            child: const Text("Đóng"),
-          ),
-        ],
-      ),
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Lỗi'),
+          content: Text(message),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: Text('Đóng'),
+            ),
+          ],
+        );
+      },
     );
   }
 
+
+
   Future<String> _createPaymentUrl() async {
-    // Giữ nguyên xử lý cho các phương thức khác (PayPal)
-    final url = Uri.parse('http://192.168.44.2:8080/api/payments/create');
+    final url = Uri.parse('http://localhost:8080/api/payment/vnpay/order/${widget.orderId}'); // Sử dụng API với orderId
 
     try {
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          "orderId": widget.orderId,
-          "amount": widget.amount,
-          "method": _selectedMethod,
-        }),
       );
 
-      if (response.statusCode == 200 || response.statusCode == 201) {
+      if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return data['paymentUrl'] ??
-            'https://api-m.sandbox.paypal.com/v2/checkout/orders';
+        // Giả sử API trả về "url" chứa URL thanh toán
+        return data['url'] ?? 'https://api-m.sandbox.paypal.com/v2/checkout/orders'; // URL mặc định nếu không có URL thanh toán
       } else {
         throw Exception('Lỗi tạo URL thanh toán: ${response.statusCode}');
       }
     } catch (e) {
       print('Lỗi khi tạo URL thanh toán: $e');
-      return 'https://api-m.sandbox.paypal.com/v2/checkout/orders';
+      return 'https://api-m.sandbox.paypal.com/v2/checkout/orders'; // URL mặc định nếu có lỗi
     }
   }
+
+
 
   void _openPaymentInNewTab() {
     if (_paymentUrl != null && kIsWeb) {
@@ -218,14 +245,14 @@ class PaymentScreenState extends State<PaymentScreen> {
 
   Future<void> _checkPaymentStatus() async {
     try {
-      final url = Uri.parse('http://192.168.44.2:8080/api/orders/${widget.orderId}/status');
+      final url = Uri.parse('http://localhost:8080/api/orders/${widget.orderId}');
       final response = await http.get(url);
-
+      print(url);
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final status = data['status'];
-
-        if (status == 'completed') {
+        final status = data['orderStatus']; // Giả sử response có field 'status'
+        print(status);
+        if (status == 'Completed') {
           // Thanh toán thành công
           _statusCheckTimer?.cancel();
           setState(() {
@@ -235,12 +262,15 @@ class PaymentScreenState extends State<PaymentScreen> {
           // Xóa giỏ hàng
           Provider.of<CartProvider>(context, listen: false).clear();
 
-          // Chuyển thẳng sang trang success
+          // Chuyển sang màn hình thành công (SuccessScreen)
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (context) => SuccessScreen()),
+            MaterialPageRoute(
+              builder: (context) => SuccessScreen(), // nếu SuccessScreen cần orderId
+            ),
           );
-        } else if (status == 'cancelled') {
+
+        } else if (status == 'Cancelled') {
           // Thanh toán bị hủy
           _statusCheckTimer?.cancel();
           setState(() {
@@ -254,28 +284,11 @@ class PaymentScreenState extends State<PaymentScreen> {
     }
   }
 
+
   @override
   void dispose() {
     _statusCheckTimer?.cancel();
     super.dispose();
-  }
-
-  Future<void> _updateOrderStatus(String status) async {
-    try {
-      final url = Uri.parse('http://192.168.44.2:8080/api/orders/${widget.orderId}/status');
-
-      await http.put(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({"status": status}),
-      );
-
-      if (status == "completed" || status == "pending") {
-        Provider.of<CartProvider>(context, listen: false).clear();
-      }
-    } catch (e) {
-      print('Lỗi khi cập nhật trạng thái đơn hàng: $e');
-    }
   }
 
   void _showCancelDialog() {
@@ -329,6 +342,9 @@ class PaymentScreenState extends State<PaymentScreen> {
   Widget _buildOrderDetails() {
     final cart = Provider.of<CartProvider>(context);
 
+
+
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -358,6 +374,72 @@ class PaymentScreenState extends State<PaymentScreen> {
         ),
         const SizedBox(height: 16),
       ],
+    );
+  }
+
+  Future<void> _handleDeeplink() async {
+    try {
+      final Uri? initialUri = (await getInitialLink()) as Uri?; // Lấy deeplink khi mở app
+      if (initialUri != null && initialUri.scheme == 'myapp' && initialUri.host == 'payment-result') {
+        final status = initialUri.queryParameters['status'];
+        final txnRef = initialUri.queryParameters['txnRef'];
+
+        if (status == 'success') {
+          // Xoá giỏ hàng
+          Provider.of<CartProvider>(context, listen: false).clear();
+
+          // Điều hướng tới trang thành công
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => SuccessScreen(txnRef: txnRef)),
+          );
+        } else {
+          _showFailureDialog();
+        }
+      }
+    } catch (e) {
+      print('Lỗi khi xử lý deeplink: $e');
+    }
+  }
+
+
+  void _showSuccessDialog(String txnRef) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Thanh toán thành công'),
+          content: Text('Thanh toán đã hoàn tất. Mã giao dịch: $txnRef'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: Text('Đóng'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showFailureDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Thanh toán thất bại'),
+          content: Text('Thanh toán của bạn không thành công. Vui lòng thử lại sau.'),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: Text('Đóng'),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -481,7 +563,7 @@ class PaymentScreenState extends State<PaymentScreen> {
           label: const Text("Thanh toán", style: TextStyle(fontSize: 16)),
           onPressed: _initializePayment,
           style: ElevatedButton.styleFrom(
-            minimumSize: const Size.fromHeight(50),
+            minimumSize: const Size(double.infinity, 50),
             backgroundColor: Colors.blue,
             foregroundColor: Colors.white,
           ),

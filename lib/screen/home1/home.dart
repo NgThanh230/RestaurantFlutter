@@ -53,14 +53,14 @@ class _HomeScreenState extends State<HomePage> {
         final slideDishes = data
             .where((dish) =>
         dish['category'] != null &&
-            dish['category']['categoryId'] == 10)
+            dish['category']['categoryId'] != null)
             .take(5)
             .toList();
         print(slideDishes);
         final promotionDishes = data
             .where((dish) =>
         dish['category'] != null &&
-            dish['category']['categoryId'] == 10)
+            dish['category']['categoryId'] != null)
             .take(5)
             .toList();
 
@@ -69,7 +69,6 @@ class _HomeScreenState extends State<HomePage> {
         setState(() {
           slideItems = List<Map<String, dynamic>>.from(slideDishes);
           promotions = List<Map<String, dynamic>>.from(promotionDishes);
-          print("Slide items count: ${slideItems.length}");
         });
       } else {
         print('Lỗi response: ${response.statusCode}');

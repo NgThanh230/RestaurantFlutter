@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class AuthService {
-  final String baseUrl = "http://10.0.2.2:5000"; // Cập nhật IP backend
+  final String baseUrl = "http://localhost:8080"; // Cập nhật IP backend
 
   // Đăng ký tài khoản
   Future<Map<String, dynamic>> register(String username, String email, String password, String role) async {

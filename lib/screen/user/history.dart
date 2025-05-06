@@ -20,7 +20,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Future<void> fetchOrders() async {
     try {
       final response = await http.get(
-        Uri.parse('http://192.168.44.2:8080/api/reservations'), // Đổi IP nếu cần
+        Uri.parse('http://localhost:8080/api/reservations'), // Đổi IP nếu cần
       );
       if (response.statusCode == 200) {
         final body = json.decode(response.body);
